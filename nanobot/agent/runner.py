@@ -34,6 +34,7 @@ class AgentRunSpec:
     max_iterations_message: str | None = None
     concurrent_tools: bool = False
     fail_on_tool_error: bool = False
+    skip_tools: bool = False  # Skip tool definitions (e.g. for vision-only models)
 
 
 @dataclass(slots=True)
@@ -70,7 +71,7 @@ class AgentRunner:
             await hook.before_iteration(context)
             kwargs: dict[str, Any] = {
                 "messages": messages,
-                "tools": spec.tools.get_definitions(),
+                "tools": None if spec.skip_tools else spec.tools.get_definitions(),
                 "model": spec.model,
             }
             if spec.temperature is not None:

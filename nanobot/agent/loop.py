@@ -318,6 +318,7 @@ class AgentLoop:
         channel: str = "cli",
         chat_id: str = "direct",
         message_id: str | None = None,
+        skip_tools: bool = False,
     ) -> tuple[str | None, list[str], list[dict]]:
         """Run the agent iteration loop.
 
@@ -349,6 +350,7 @@ class AgentLoop:
             hook=hook,
             error_message="Sorry, I encountered an error calling the AI model.",
             concurrent_tools=True,
+            skip_tools=skip_tools,
         ))
         self._last_usage = result.usage
         if result.stop_reason == "max_iterations":
@@ -535,7 +537,8 @@ class AgentLoop:
         # Switch to vision_model if message contains media
         has_media = bool(msg.media)
         original_model = self.model
-        if has_media and self.vision_model:
+        use_vision = has_media and self.vision_model
+        if use_vision:
             self.model = self.vision_model
 
         async def _bus_progress(content: str, *, tool_hint: bool = False) -> None:
@@ -554,6 +557,7 @@ class AgentLoop:
                 on_stream_end=on_stream_end,
                 channel=msg.channel, chat_id=msg.chat_id,
                 message_id=msg.metadata.get("message_id"),
+                skip_tools=use_vision,
             )
         finally:
             self.model = original_model
