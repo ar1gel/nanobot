@@ -42,6 +42,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     reasoning_effort: str | None = None  # low / medium / high - enables LLM thinking mode
     timezone: str = "UTC"  # IANA timezone, e.g. "Asia/Shanghai", "America/New_York"
+    vision_model: str | None = None  # Optional model for image recognition (e.g. "google/gemma-3-12b-it:free")
 
 
 class AgentsConfig(Base):
