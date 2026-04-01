@@ -11,9 +11,9 @@ from typing import Any, Literal
 
 from loguru import logger
 from pydantic import Field
-from telegram import BotCommand, ReactionTypeEmoji, ReplyParameters, Update
+from telegram import BotCommand, InlineKeyboardButton, InlineKeyboardMarkup, ReactionTypeEmoji, ReplyParameters, Update
 from telegram.error import BadRequest, TimedOut
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
@@ -193,13 +193,34 @@ class TelegramChannel(BaseChannel):
 
     # Commands registered with Telegram's command menu
     BOT_COMMANDS = [
-        BotCommand("start", "Start the bot"),
-        BotCommand("new", "Start a new conversation"),
-        BotCommand("stop", "Stop the current task"),
-        BotCommand("help", "Show available commands"),
-        BotCommand("restart", "Restart the bot"),
-        BotCommand("status", "Show bot status"),
+        BotCommand("start", "Начать"),
+        BotCommand("new", "Новый диалог"),
+        BotCommand("stop", "Остановить"),
+        BotCommand("model", "Выбрать модель"),
+        BotCommand("restart", "Перезапустить"),
+        BotCommand("status", "Статус"),
+        BotCommand("help", "Помощь"),
     ]
+
+    # Доступные модели для переключения
+    AVAILABLE_MODELS = {
+        "openrouter": [
+            ("qwen/qwen3.6-plus-preview:free", "Qwen 3.6 Plus (free)"),
+            ("google/gemma-3-27b-it:free", "Gemma 3 27B (free)"),
+            ("google/gemma-3-12b-it:free", "Gemma 3 12B (free)"),
+            ("meta-llama/llama-3.3-70b-instruct:free", "Llama 3.3 70B (free)"),
+            ("qwen/qwen2.5-vl-72b-instruct:free", "Qwen 2.5 VL 72B (free)"),
+        ],
+        "github_copilot": [
+            ("github-copilot/gpt-4o", "GPT-4o"),
+            ("github-copilot/gpt-5.4", "GPT-5.4"),
+            ("github-copilot/gpt-5.4-mini", "GPT-5.4 mini"),
+            ("github-copilot/claude-sonnet-4.5", "Claude Sonnet 4.5"),
+            ("github-copilot/claude-opus-4.6", "Claude Opus 4.6"),
+            ("github-copilot/gemini-3.1-pro-preview", "Gemini 3.1 Pro"),
+            ("github-copilot/grok-code", "Grok Code Fast 1"),
+        ],
+    }
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -282,6 +303,10 @@ class TelegramChannel(BaseChannel):
         self._app.add_handler(CommandHandler("restart", self._forward_command))
         self._app.add_handler(CommandHandler("status", self._forward_command))
         self._app.add_handler(CommandHandler("help", self._on_help))
+        self._app.add_handler(CommandHandler("model", self._on_model))
+
+        # Inline keyboard callback handler
+        self._app.add_handler(CallbackQueryHandler(self._on_callback))
 
         # Add message handler for text, photos, voice, documents
         self._app.add_handler(
@@ -572,9 +597,10 @@ class TelegramChannel(BaseChannel):
 
         user = update.effective_user
         await update.message.reply_text(
-            f"👋 Hi {user.first_name}! I'm nanobot.\n\n"
-            "Send me a message and I'll respond!\n"
-            "Type /help to see available commands."
+            f"👋 Привет, {user.first_name}! Я нано-бот 🐈\n\n"
+            "Отправь мне сообщение — я отвечу!\n"
+            "Напиши /help чтобы увидеть команды.\n"
+            "Напиши /model чтобы выбрать модель."
         )
 
     async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -582,13 +608,117 @@ class TelegramChannel(BaseChannel):
         if not update.message:
             return
         await update.message.reply_text(
-            "🐈 nanobot commands:\n"
-            "/new — Start a new conversation\n"
-            "/stop — Stop the current task\n"
-            "/restart — Restart the bot\n"
-            "/status — Show bot status\n"
-            "/help — Show available commands"
+            "🐈 Команды нано-бота:\n"
+            "/new — Новый диалог\n"
+            "/stop — Остановить задачу\n"
+            "/model — Выбрать модель\n"
+            "/restart — Перезапустить бота\n"
+            "/status — Статус бота\n"
+            "/help — Эта справка"
         )
+
+    async def _on_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /model command — show inline keyboard with model choices."""
+        if not update.message:
+            return
+
+        keyboard = [
+            [InlineKeyboardButton("🆓 OpenRouter модели", callback_data="models_openrouter")],
+            [InlineKeyboardButton("⭐ Copilot Pro модели", callback_data="models_copilot")],
+            [InlineKeyboardButton("📋 Текущая модель", callback_data="model_current")],
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text("🤖 Выбери модель:", reply_markup=reply_markup)
+
+    async def _on_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle inline keyboard callbacks."""
+        query = update.callback_query
+        if not query:
+            return
+
+        data = query.data
+
+        if data == "models_openrouter":
+            keyboard = []
+            for model_id, label in self.AVAILABLE_MODELS["openrouter"]:
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"select_{model_id}")])
+            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="model_back")])
+            await query.edit_message_text(
+                "🆓 OpenRouter модели (бесплатно):",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+        elif data == "models_copilot":
+            keyboard = []
+            for model_id, label in self.AVAILABLE_MODELS["github_copilot"]:
+                keyboard.append([InlineKeyboardButton(label, callback_data=f"select_{model_id}")])
+            keyboard.append([InlineKeyboardButton("🔙 Назад", callback_data="model_back")])
+            await query.edit_message_text(
+                "⭐ Copilot Pro модели:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+        elif data == "model_current":
+            try:
+                from nanobot.config.loader import get_config_path
+                import json
+                cfg_path = get_config_path()
+                with open(cfg_path) as f:
+                    cfg = json.load(f)
+                current = cfg.get("agents", {}).get("defaults", {}).get("model", "неизвестно")
+                provider = cfg.get("agents", {}).get("defaults", {}).get("provider", "auto")
+                await query.edit_message_text(
+                    f"📋 Текущая модель: <b>{current}</b>\n"
+                    f"Провайдер: <b>{provider}</b>",
+                    parse_mode="HTML",
+                )
+            except Exception as e:
+                await query.edit_message_text(f"Не удалось прочитать конфиг: {e}")
+
+        elif data == "model_back":
+            keyboard = [
+                [InlineKeyboardButton("🆓 OpenRouter модели", callback_data="models_openrouter")],
+                [InlineKeyboardButton("⭐ Copilot Pro модели", callback_data="models_copilot")],
+                [InlineKeyboardButton("📋 Текущая модель", callback_data="model_current")],
+            ]
+            await query.edit_message_text(
+                "🤖 Выбери модель:",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+
+        elif data.startswith("select_"):
+            model_id = data[7:]
+            try:
+                from nanobot.config.loader import get_config_path
+                import json
+                cfg_path = get_config_path()
+                with open(cfg_path) as f:
+                    cfg = json.load(f)
+                cfg["agents"]["defaults"]["model"] = model_id
+                cfg["agents"]["defaults"]["provider"] = "auto"
+                with open(cfg_path, "w") as f:
+                    json.dump(cfg, f, indent=2, ensure_ascii=False)
+
+                label = model_id
+                for provider_models in self.AVAILABLE_MODELS.values():
+                    for mid, mlabel in provider_models:
+                        if mid == model_id:
+                            label = mlabel
+                            break
+
+                await query.edit_message_text(
+                    f"✅ Модель переключена на:\n<b>{label}</b>\n"
+                    f"<code>{model_id}</code>\n\n"
+                    "Следующее сообщение будет обработано новой моделью.",
+                    parse_mode="HTML",
+                    reply_markup=InlineKeyboardMarkup([[
+                        InlineKeyboardButton("🔙 Назад к моделям", callback_data="model_back")
+                    ]]),
+                )
+            except Exception as e:
+                await query.edit_message_text(f"❌ Ошибка: {e}")
+
+        await query.answer()
 
     @staticmethod
     def _sender_id(user) -> str:
