@@ -762,6 +762,11 @@ def gateway(
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
     async def run():
+        # Startup delay to avoid Telegram polling conflict during redeploy
+        startup_delay = float(os.environ.get("NANOBOT_STARTUP_DELAY", "0"))
+        if startup_delay > 0:
+            console.print(f"[yellow]⏳ Startup delay: {startup_delay}s (waiting for old instance to release Telegram polling)[/yellow]")
+            await asyncio.sleep(startup_delay)
         try:
             await cron.start()
             await heartbeat.start()
