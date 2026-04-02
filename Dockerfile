@@ -23,7 +23,6 @@ RUN mkdir -p /root/.nanobot
 
 # Gateway default port
 EXPOSE 18790
-EXPOSE 8090
 
 ENTRYPOINT ["nanobot"]
 CMD ["status"]
