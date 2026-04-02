@@ -764,6 +764,95 @@ def gateway(
 
     console.print(f"[green]✓[/green] Heartbeat: every {hb_cfg.interval_s}s")
 
+    # ---- Yandex Dialogs webhook (lightweight aiohttp server) ----
+    yandex_port = int(os.environ.get("YANDEX_WEBHOOK_PORT", "8090"))
+    yandex_secret = os.environ.get("YANDEX_WEBHOOK_SECRET", "")
+
+    async def yandex_webhook_handler(request: "web.Request") -> "web.Response":
+        """Handle Yandex Dialogs webhook requests."""
+        from aiohttp import web as _web
+        try:
+            body = await request.json()
+        except Exception:
+            return _web.json_response({"error": "invalid JSON"}, status=400)
+
+        # Optional secret validation
+        if yandex_secret:
+            auth = request.headers.get("Authorization", "")
+            if auth != f"Bearer {yandex_secret}":
+                return _web.json_response({"error": "unauthorized"}, status=401)
+
+        # Extract user message from Yandex Dialogs format
+        request_obj = body.get("request", {})
+        original_utterance = request_obj.get("original_utterance", "") or request_obj.get("utterance", "")
+        user_id = body.get("session", {}).get("user", {}).get("user_id", "unknown")
+        session_id = body.get("session", {}).get("session_id", "default")
+
+        if not original_utterance:
+            return _web.json_response({
+                "version": body.get("version", "1.0"),
+                "session": body.get("session", {}),
+                "response": {
+                    "text": "Я не услышал сообщение. Попробуй ещё раз.",
+                    "end_session": False,
+                },
+            })
+
+        # Process through nanobot agent
+        channel, chat_id = _pick_heartbeat_target()
+        session_key = f"yandex:{user_id}"
+
+        async def _silent(*_args, **_kwargs):
+            pass
+
+        resp = await agent.process_direct(
+            original_utterance,
+            session_key=session_key,
+            channel=channel,
+            chat_id=chat_id,
+            on_progress=_silent,
+        )
+
+        reply_text = resp.content if resp else "Извини, я не смог обработать запрос."
+
+        # Keep session bounded
+        session = agent.sessions.get_or_create(session_key)
+        session.retain_recent_legal_suffix(20)
+        agent.sessions.save(session)
+
+        return _web.json_response({
+            "version": body.get("version", "1.0"),
+            "session": body.get("session", {}),
+            "response": {
+                "text": reply_text,
+                "end_session": False,
+                "tts": reply_text,
+            },
+        })
+
+    async def yandex_health(request: "web.Request") -> "web.Response":
+        from aiohttp import web as _web
+        return _web.json_response({"status": "ok"})
+
+    async def run_yandex_server():
+        """Run lightweight aiohttp server for Yandex webhook."""
+        from aiohttp import web as _web
+        yandex_app = _web.Application()
+        yandex_app.router.add_post("/yandex-webhook", yandex_webhook_handler)
+        yandex_app.router.add_get("/health", yandex_health)
+        runner = _web.AppRunner(yandex_app)
+        await runner.setup()
+        site = _web.TCPSite(runner, "0.0.0.0", yandex_port)
+        await site.start()
+        console.print(f"[green]✓[/green] Yandex webhook server on port {yandex_port}")
+        # Keep running until cancelled
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            await runner.cleanup()
+
+    # ---- End Yandex webhook setup ----
+
     async def run():
         # Startup delay to avoid Telegram polling conflict during redeploy
         startup_delay = float(os.environ.get("NANOBOT_STARTUP_DELAY", "0"))
@@ -773,9 +862,11 @@ def gateway(
         try:
             await cron.start()
             await heartbeat.start()
+            yandex_task = asyncio.create_task(run_yandex_server())
             await asyncio.gather(
                 agent.run(),
                 channels.start_all(),
+                yandex_task,
             )
         except KeyboardInterrupt:
             console.print("\nShutting down...")
