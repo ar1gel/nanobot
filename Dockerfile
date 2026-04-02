@@ -21,8 +21,5 @@ RUN uv pip install --system --no-cache .
 # Create config directory
 RUN mkdir -p /root/.nanobot
 
-# Gateway default port
-EXPOSE 18790
-
 ENTRYPOINT ["nanobot"]
 CMD ["status"]
