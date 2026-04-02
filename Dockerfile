@@ -21,5 +21,10 @@ RUN uv pip install --system --no-cache .
 # Create config directory
 RUN mkdir -p /root/.nanobot
 
+# Gateway default port
+EXPOSE 18790
+# Yandex default port
+EXPOSE 18789
+
 ENTRYPOINT ["nanobot"]
 CMD ["status"]
